@@ -18,7 +18,7 @@ func main() {
 	router.GET("/machine/:name", func(c *gin.Context) {
 		jobname := c.Param("name")
 		list := dic[jobname]
-		err = job.NewDbjob(jobname, list).Start()
+		err := job.NewDbjob(jobname, list).Start()
 		if err != nil {
 			fmt.Println(err)
 			c.String(400, "err=%s", err.Error())
