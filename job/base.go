@@ -138,7 +138,23 @@ func (j *dbjob) end(ret error) error {
 	return nil
 }
 
-func (j *dbjob) pluginEnd(name string, ret error, start, end time.Time) error {
+func (j *dbjob) pluginSetStart(name string) error {
+	start := time.Now()
+	for i, task := range j.Jobtask {
+		if task.Name == name {
+			j.Jobtask[i].Stime = start
+		}
+	}
+	query := bson.M{"_id": j.Jobid, "jobtask.name": name}
+	set := bson.M{"$set": bson.M{
+		"jobtask.$.stime": start,
+	}}
+	err := db.C("job").Update(query, set)
+	return err
+}
+
+func (j *dbjob) pluginEnd(name string, ret error) error {
+	end := time.Now()
 	status := "succ"
 	if ret != nil {
 		status = "fail"
@@ -147,7 +163,6 @@ func (j *dbjob) pluginEnd(name string, ret error, start, end time.Time) error {
 	set := bson.M{"$set": bson.M{
 		"jobtask.$.err":    fmt.Sprintf("%v", ret),
 		"jobtask.$.status": status,
-		"jobtask.$.stime":  start,
 		"jobtask.$.etime":  end,
 	}}
 	err := db.C("job").Update(query, set)
@@ -167,11 +182,9 @@ func (j *dbjob) run() error {
 			return err
 		}
 		p := pfac()
-		stime := time.Now()
+		j.pluginSetStart(task.Name)
 		err = p.Run()
-		etime := time.Now()
-
-		dberr := j.pluginEnd(task.Name, err, stime, etime)
+		dberr := j.pluginEnd(task.Name, err)
 		if dberr != nil {
 			logrus.Info(dberr)
 			return dberr
