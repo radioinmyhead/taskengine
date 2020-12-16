@@ -26,7 +26,6 @@ type jobtask struct {
 	Err    string
 	Stime  time.Time
 	Etime  time.Time
-	Cost   time.Duration
 }
 
 type dbjob struct {
@@ -38,7 +37,6 @@ type dbjob struct {
 	Err     string
 	Stime   time.Time
 	Etime   time.Time
-	Cost    time.Duration
 	ticker  *time.Ticker `bson:"-"` // 只有这一个是运行状态，其他的都db状态。
 }
 
@@ -132,7 +130,6 @@ func (j *dbjob) end(ret error) error {
 		"err":    j.Err,
 		"status": j.Status,
 		"etime":  time.Now(),
-		"cost":   time.Now().Sub(j.Stime),
 	}})
 	if err != nil {
 		logrus.Info("db write failed", err)
@@ -152,7 +149,6 @@ func (j *dbjob) pluginEnd(name string, ret error, start, end time.Time) error {
 		"jobtask.$.status": status,
 		"jobtask.$.stime":  start,
 		"jobtask.$.etime":  end,
-		"jobtask.$.cost":   end.Sub(start),
 	}}
 	err := db.C("job").Update(query, set)
 	return err
