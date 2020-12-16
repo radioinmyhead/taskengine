@@ -1,19 +1,20 @@
 package plugin
 
 import (
+	"context"
 	"fmt"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 type machinewait struct{}
 
-func (p *machinewait) Run() error {
-	logrus.Info("wait machine to run")
+func (p *machinewait) Conf(b []byte) error { return nil }
+
+func (p *machinewait) Run(ctx context.Context, result chan string) error {
+	result <- "wait machine to run"
 	//panic("panic in wait")
 	time.Sleep(time.Second)
-	logrus.Info("wait machine to run end")
+	result <- "wait machine to run end"
 	return fmt.Errorf("test wait failed")
 }
 

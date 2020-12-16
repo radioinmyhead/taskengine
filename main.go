@@ -1,30 +1,49 @@
 package main
 
 import (
-	"fmt"
+	"haha/db"
 	"haha/job"
+	"haha/model"
+
+	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
 )
 
-var dic = map[string][]string{
-	"create": {"callapi", "machinewait", "cloudinit"},
-}
-
 func main() {
+
+	db.Init()
+
 	router := gin.Default()
 
-	router.GET("/machine/:name", func(c *gin.Context) {
-		jobname := c.Param("name")
-		list := dic[jobname]
-		err := job.NewDbjob(jobname, list).Start()
+	router.POST("/machine/create", func(c *gin.Context) {
+		var err error
+		/*
+			var order *model.CreateMachine
+			err = c.Bind(order)
+			if err != nil {
+				fmt.Println(err)
+				c.String(400, "err=%s", err.Error())
+				return
+			}
+			order.Init()
+		*/
+
+		order, _ := model.NewCreateMachine("admin", "planA", 3)
+		err = order.Insert()
 		if err != nil {
 			fmt.Println(err)
 			c.String(400, "err=%s", err.Error())
 			return
 		}
-		c.String(http.StatusOK, "jobname=%s", jobname)
+		err = job.NewDbjob(order.Base.Jobname, order.Base.Tasklist, order.Col, order.ID).Start()
+		if err != nil {
+			fmt.Println(err)
+			c.String(400, "err=%s", err.Error())
+			return
+		}
+		c.String(http.StatusOK, "order=%s", order)
 	})
 	router.GET("/all", func(c *gin.Context) {
 		err := job.ContinueJobs()

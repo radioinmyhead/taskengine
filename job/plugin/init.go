@@ -1,17 +1,18 @@
 package plugin
 
 import (
+	"context"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 type cloudinit struct{}
 
-func (p *cloudinit) Run() error {
-	logrus.Info("run cloud init")
+func (p *cloudinit) Conf(b []byte) error { return nil }
+
+func (p *cloudinit) Run(ctx context.Context, result chan string) error {
+	result <- "run cloud init"
 	time.Sleep(time.Second * 3)
-	logrus.Info("run cloud init end")
+	result <- "run cloud init end"
 	return nil
 }
 

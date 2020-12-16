@@ -1,9 +1,13 @@
 package plugin
 
-import "fmt"
+import (
+	"context"
+	"fmt"
+)
 
 type pluginer interface {
-	Run() error
+	Run(ctx context.Context, result chan string) error
+	Conf([]byte) error
 }
 
 var allplugin map[string]func() pluginer

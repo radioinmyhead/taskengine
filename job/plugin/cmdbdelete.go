@@ -1,17 +1,18 @@
 package plugin
 
 import (
+	"context"
 	"time"
-
-	"github.com/sirupsen/logrus"
 )
 
 type cmdbdelete struct{}
 
-func (p *cmdbdelete) Run() error {
-	logrus.Info("wait cmdb delete machine")
+func (p *cmdbdelete) Conf(b []byte) error { return nil }
+
+func (p *cmdbdelete) Run(ctx context.Context, result chan string) error {
+	result <- "wait cmdb delete machine"
 	time.Sleep(time.Second * 10)
-	logrus.Info("wait cmdb delete machine end")
+	result <- "wait cmdb delete machine end"
 	return nil
 }
 
