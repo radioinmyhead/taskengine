@@ -2,7 +2,7 @@ package db
 
 import (
 	"haha/job"
-	"haha/model"
+	"haha/plugin"
 	"time"
 
 	"github.com/globalsign/mgo"
@@ -29,7 +29,7 @@ func Init() {
 	//db = session.DB(dbname)
 
 	job.SetDb(session.DB(dbname))
-	model.SetDB(session.DB(dbname))
+	plugin.SetDB(session.DB(dbname))
 }
 
 //func C(name string) *mgo.Collation {

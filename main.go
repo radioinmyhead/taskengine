@@ -1,12 +1,11 @@
 package main
 
 import (
+	"fmt"
 	"haha/db"
 	"haha/job"
-	"haha/model"
-	_ "haha/plugin"
+	"haha/plugin"
 
-	"fmt"
 	"net/http"
 
 	"github.com/gin-gonic/gin"
@@ -31,7 +30,7 @@ func main() {
 			order.Init()
 		*/
 
-		order, _ := model.NewCreateMachine("admin", "planA", 3)
+		order, _ := plugin.NewCreateMachine("admin", "planA", 3)
 		err = order.Insert()
 		if err != nil {
 			fmt.Println(err)

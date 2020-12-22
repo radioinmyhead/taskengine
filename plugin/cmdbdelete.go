@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"haha/job"
 	"time"
 )
 
@@ -16,6 +17,6 @@ func (p *cmdbdelete) Run(ctx context.Context, result chan string) error {
 	return nil
 }
 
-//func init() {
-//	register("cmdbdelete", func() pluginer { return &cmdbdelete{} })
-//}
+func init() {
+	job.Register("cmdbdelete", func() job.Pluginer { return &cmdbdelete{} })
+}

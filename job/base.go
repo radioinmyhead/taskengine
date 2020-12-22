@@ -34,6 +34,14 @@ type jobcontext struct {
 	ID  bson.ObjectId `bson:"_id"`
 }
 
+func CheckFinishbyContextid(id bson.ObjectId) (finish bool, err error) {
+	query := bson.M{"context._id": id, "status": ""}
+	n, err := db.C("job").Find(query).Count()
+	if err != nil {
+		return
+	}
+	return n == 0, err
+}
 func (j jobcontext) get() (b []byte, err error) {
 	var data interface{}
 	err = db.C(j.Col).FindId(j.ID).Sort("-_id").Limit(1).One(&data)
