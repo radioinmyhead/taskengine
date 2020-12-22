@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"haha/job/plugin"
 	"time"
 
 	"github.com/globalsign/mgo"
@@ -230,7 +229,7 @@ func (j *dbjob) run() error {
 		logrus.Info("get args:", string(args))
 
 		// get plugin
-		pfac, err := plugin.GetPlugin(task.Name)
+		pfac, err := getPlugin(task.Name)
 		if err != nil {
 			return err
 		}

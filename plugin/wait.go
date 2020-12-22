@@ -18,6 +18,6 @@ func (p *machinewait) Run(ctx context.Context, result chan string) error {
 	return fmt.Errorf("test wait failed")
 }
 
-func init() {
-	register("machinewait", func() pluginer { return &machinewait{} })
-}
+//func init() {
+//	register("machinewait", func() pluginer { return &machinewait{} })
+//}

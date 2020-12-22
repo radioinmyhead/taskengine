@@ -16,6 +16,6 @@ func (p *cloudinit) Run(ctx context.Context, result chan string) error {
 	return nil
 }
 
-func init() {
-	register("cloudinit", func() pluginer { return &cloudinit{} })
-}
+//func init() {
+//	register("cloudinit", func() pluginer { return &cloudinit{} })
+//}

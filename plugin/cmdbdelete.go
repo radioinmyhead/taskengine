@@ -16,6 +16,6 @@ func (p *cmdbdelete) Run(ctx context.Context, result chan string) error {
 	return nil
 }
 
-func init() {
-	register("cmdbdelete", func() pluginer { return &cmdbdelete{} })
-}
+//func init() {
+//	register("cmdbdelete", func() pluginer { return &cmdbdelete{} })
+//}

@@ -4,6 +4,7 @@ import (
 	"haha/db"
 	"haha/job"
 	"haha/model"
+	_ "haha/plugin"
 
 	"fmt"
 	"net/http"
@@ -45,6 +46,7 @@ func main() {
 		}
 		c.String(http.StatusOK, "order=%s", order)
 	})
+
 	router.GET("/all", func(c *gin.Context) {
 		err := job.ContinueJobs()
 		if err != nil {

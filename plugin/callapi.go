@@ -32,6 +32,6 @@ func (p *call) Run(ctx context.Context, result chan string) (err error) {
 	return
 }
 
-func init() {
-	register("callapi", func() pluginer { return &call{} })
-}
+//func init() {
+//	register("callapi", func() pluginer { return &call{} })
+//}
