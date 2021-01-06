@@ -30,14 +30,17 @@ func main() {
 			order.Init()
 		*/
 
-		order, _ := plugin.NewCreateMachine("admin", "planA", 3)
+		order, _ := plugin.NewMachineCreate("admin", "planA", 3)
 		err = order.Insert()
 		if err != nil {
 			fmt.Println(err)
 			c.String(400, "err=%s", err.Error())
 			return
 		}
-		err = job.NewDbjob(order.Base.Jobname, order.Base.Tasklist, order.Col, order.ID).Start()
+
+		err = job.NewDbjob("machine_create", []string{"machine_create_callapi",
+			"machine_create_cloudinit",
+			"machine_create_check"}, string(plugin.DBMachineCreate), order.ID).Start()
 		if err != nil {
 			fmt.Println(err)
 			c.String(400, "err=%s", err.Error())

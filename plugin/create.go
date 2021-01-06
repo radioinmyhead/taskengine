@@ -2,82 +2,76 @@ package plugin
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"haha/job"
 	"time"
 
 	"github.com/globalsign/mgo/bson"
+	"github.com/sirupsen/logrus"
 )
 
-type CreateMachine struct {
-	Base `json:"base"`
-	ID   bson.ObjectId `json:"_id" bson:"_id"`               // db id
-	Oper string        `json:"oper" bson:"oper" form:"oper"` // args:oper
-	Plan string        `json:"plan" bson:"plan" form:"plan"` // args:plan
-	Num  int           `json:"num" bson:"num" form:"num"`    // args:num
-	IDs  []string      `json:"ids" bson:"ids"`               // result
+// MachineCreate the order of MachineCreate
+type MachineCreate struct {
+	ID     bson.ObjectId `bson:"_id"`              // db id
+	Oper   string        `bson:"oper" form:"oper"` // args:oper
+	Plan   string        `bson:"plan" form:"plan"` // args:plan
+	Num    int           `bson:"num" form:"num"`   // args:num
+	IDs    []string      `bson:"ids"`              // result
+	Status string        // order status
 }
 
-func NewCreateMachine(oper, plan string, num int) (ret *CreateMachine, err error) {
-	ret = &CreateMachine{
+// NewMachineCreate create machine order from httpargs
+func NewMachineCreate(oper, plan string, num int) (ret *MachineCreate, err error) {
+	ret = &MachineCreate{
 		ID:   bson.NewObjectId(),
 		Oper: oper,
 		Plan: plan,
 		Num:  num,
 	}
-	ret.Init()
 	return
 }
-func NewCreateMachineFromJson(b []byte) (ret *CreateMachine, err error) {
-	ret = &CreateMachine{}
-	err = json.Unmarshal(b, ret)
-	if err != nil {
-		return nil, err
-	}
-	ret.Init()
+
+// FindMachineCreate get order from db by id
+func FindMachineCreate(id bson.ObjectId) (job.PluginRunner, error) {
+	ret := &MachineCreate{}
+	err := db.C(string(DBMachineCreate)).FindId(id).One(ret)
 	return ret, err
 }
 
-func (cm *CreateMachine) Init() {
-	cm.Base.Col = string(DBMachineCreate)
-	cm.Base.Jobname = "machine-create"
-	cm.Base.Tasklist = []string{"machinecreate-callapi", "machinecreate-init", "machinecreate-check"}
-}
-
-func (cm *CreateMachine) Insert() (err error) {
+func (cm *MachineCreate) Insert() (err error) {
 	err = db.C(string(DBMachineCreate)).Insert(cm)
 	return
 }
 
-func (cm *CreateMachine) SetIDs(ids []string) (err error) {
+func (cm *MachineCreate) SetIDs(ids []string) (err error) {
 	cm.IDs = ids
 	set := bson.M{"$set": bson.M{"ids": ids}}
 	err = db.C(string(DBMachineCreate)).UpdateId(cm.ID, set)
 	return
 }
 
-func (cm *CreateMachine) Conf(data []byte) (err error) {
-	tmp, err := NewCreateMachineFromJson(data)
-	if err != nil {
-		return
+func (cm *MachineCreate) Endwith(ret error) (err error) {
+	cm.Status = "succ"
+	if ret != nil {
+		cm.Status = "fail"
 	}
-	*cm = *tmp
-	return nil
+	set := bson.M{"$set": bson.M{"status": cm.Status}}
+	err = db.C(string(DBMachineCreate)).UpdateId(cm.ID, set)
+	return
 }
 
-func (cm *CreateMachine) Step1(ctx context.Context, result chan string) (err error) {
+func (cm *MachineCreate) callapi(ctx context.Context, result chan string) (err error) {
 	result <- "call plugin api"
 	time.Sleep(time.Second)
 	err = cm.SetIDs([]string{"A", "B", "C"})
 	result <- "call plugin api end"
-	fmt.Println("call api", err)
+	//fmt.Println("call api", err)
 	return
 }
 
-func (cm *CreateMachine) Step2(ctx context.Context, result chan string) (err error) {
-	fmt.Println("call init")
-
+func (cm *MachineCreate) cloudinit(ctx context.Context, result chan string) (err error) {
+	// TODO cant run multi times.
+	logrus.Info("call init")
 	list := []*Cloudinit{}
 	for _, ip := range cm.IDs {
 		ci := NewCloudinit(ip)
@@ -85,17 +79,20 @@ func (cm *CreateMachine) Step2(ctx context.Context, result chan string) (err err
 		if err != nil {
 			return
 		}
-		err = job.NewDbjob("cloudinit", []string{"Cloudinit"}, "cloudinit", ci.ID).Start()
+		err = job.NewDbjob("cloudinit", []string{"machine_init_create", "machine_init_installpackage", "machine_init_reboot"},
+			string(DBMachineInit), ci.ID).Start()
 		if err != nil {
 			return
 		}
 		list = append(list, ci)
 	}
+
 	for {
 		i := 0
 		for _, ci := range list {
 			finish, err := job.CheckFinishbyContextid(ci.ID)
 			if err != nil {
+				logrus.Info("call init: check finish: failed, err=", err)
 				return err
 			}
 			if !finish {
@@ -104,43 +101,45 @@ func (cm *CreateMachine) Step2(ctx context.Context, result chan string) (err err
 			}
 		}
 		if i > 0 {
+			logrus.Info("call init: check finish: not finish num=", i)
 			time.Sleep(time.Second)
 		} else {
+			logrus.Info("call init: check finish: finish")
 			break
 		}
 	}
-	fmt.Println("call init end")
+	succ, err := job.CheckSuccbyContextid(list[0].ID)
+	if err != nil {
+		return
+	}
+	if !succ {
+		err = fmt.Errorf("cloud init failed,failed")
+	}
+
+	logrus.Info("call init end")
 	return nil
 }
 
-func (cm *CreateMachine) Step3(ctx context.Context, result chan string) (err error) {
+func (cm *MachineCreate) check(ctx context.Context, result chan string) (err error) {
 	return nil
 }
 
-type CreateOrderS1 struct{ CreateMachine }
+// Run cm.action(ctx context.Context, result chan string) (err error)
+func (cm *MachineCreate) Run(ctx context.Context, action string, result chan string) (err error) {
+	dic := map[string]job.RealRunner{
+		"machine_create_callapi":   cm.callapi,
+		"machine_create_cloudinit": cm.cloudinit,
+		"machine_create_check":     cm.check,
+	}
 
-func (s *CreateOrderS1) Run(ctx context.Context, result chan string) (err error) {
-	return s.Step1(ctx, result)
+	fn, ok := dic[action]
+	if !ok {
+		return fmt.Errorf("not support action=%v", action)
+
+	}
+	return fn(ctx, result)
 }
 
 func init() {
-	job.Register("machinecreate-callapi", func() job.Pluginer { return &CreateOrderS1{} })
-}
-
-type CreateOrderS2 struct{ CreateMachine }
-
-func (s *CreateOrderS2) Run(ctx context.Context, result chan string) (err error) {
-	return s.Step2(ctx, result)
-}
-func init() {
-	job.Register("machinecreate-init", func() job.Pluginer { return &CreateOrderS2{} })
-}
-
-type CreateOrderS3 struct{ CreateMachine }
-
-func (s *CreateOrderS3) Run(ctx context.Context, result chan string) (err error) {
-	return s.Step3(ctx, result)
-}
-func init() {
-	job.Register("machinecreate-check", func() job.Pluginer { return &CreateOrderS3{} })
+	job.Registerplugin(string(DBMachineCreate), FindMachineCreate)
 }

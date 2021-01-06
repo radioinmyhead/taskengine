@@ -2,7 +2,6 @@ package job
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"time"
 
@@ -11,22 +10,25 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// db
-var db *mgo.Database
-
-func SetDb(d *mgo.Database) {
-	db = d
-}
-
-var timeout = time.Second
+const (
+	timeoutDuration time.Duration = time.Second
+	timeoutCount    int           = 6
+	jobStatusSucc   string        = "succ"
+	jobStatusFail   string        = "fail"
+)
 
 type jobtask struct {
+	ID     bson.ObjectId `bson:"_id"`
 	Name   string
 	Status string
 	Err    string
 	Stime  time.Time
 	Etime  time.Time
 	Logs   []string
+}
+
+func newJobtask(name string) jobtask {
+	return jobtask{ID: bson.NewObjectId(), Name: name}
 }
 
 type jobcontext struct {
@@ -40,16 +42,17 @@ func CheckFinishbyContextid(id bson.ObjectId) (finish bool, err error) {
 	if err != nil {
 		return
 	}
-	return n == 0, err
+
+	return n == 0, nil
 }
-func (j jobcontext) get() (b []byte, err error) {
-	var data interface{}
-	err = db.C(j.Col).FindId(j.ID).Sort("-_id").Limit(1).One(&data)
+
+func CheckSuccbyContextid(id bson.ObjectId) (succ bool, err error) {
+	query := bson.M{"context._id": id, "status": "fail"}
+	n, err := db.C("job").Find(query).Count()
 	if err != nil {
 		return
 	}
-	b, err = json.Marshal(data)
-	return
+	return n == 0, nil
 }
 
 type dbjob struct {
@@ -65,6 +68,7 @@ type dbjob struct {
 	ticker  *time.Ticker `bson:"-"` // 只有这一个是运行状态，其他的都db状态。
 }
 
+// NewDbjob create a new job
 func NewDbjob(name string, list []string, table string, id bson.ObjectId) *dbjob {
 	ret := &dbjob{}
 	ret.Jobid = bson.NewObjectId()
@@ -73,14 +77,14 @@ func NewDbjob(name string, list []string, table string, id bson.ObjectId) *dbjob
 	ret.Context.Col = table
 	ret.Context.ID = id
 	for _, k := range list {
-		ret.Jobtask = append(ret.Jobtask, jobtask{Name: k})
+		ret.Jobtask = append(ret.Jobtask, newJobtask(k))
 	}
 	return ret
 }
 
 func (j *dbjob) upsert() (err error) { // upsert
 	query := bson.M{"_id": j.Jobid}
-	_, err = db.C("job").Upsert(query, j)
+	_, err = db.C(string(dbtable)).Upsert(query, j)
 	return
 }
 
@@ -88,7 +92,7 @@ func (j *dbjob) checktimeout() bool {
 	if j.Heart.IsZero() {
 		return true
 	}
-	return time.Now().Sub(j.Heart) > timeout*10
+	return time.Now().Sub(j.Heart) > timeoutDuration*time.Duration(timeoutCount)
 }
 
 func (j *dbjob) lock() error {
@@ -96,8 +100,8 @@ func (j *dbjob) lock() error {
 	j.Heart = time.Now()
 	set := bson.M{"$set": bson.M{"heart": j.Heart}}
 
-	logrus.Info("update heartbeat", j.Heart)
-	err := db.C("job").Update(query, set)
+	//logrus.Info("update heartbeat", j.Heart)
+	err := db.C(string(dbtable)).Update(query, set)
 	if err != nil {
 		logrus.Info("update heart failed", err.Error())
 		return err
@@ -121,7 +125,7 @@ func (j *dbjob) Start() (err error) {
 	}
 
 	go func() {
-		j.ticker = time.NewTicker(timeout * 1)
+		j.ticker = time.NewTicker(timeoutDuration)
 		for range j.ticker.C {
 			if j.lock() != nil {
 				j.lock()
@@ -145,14 +149,14 @@ func (j *dbjob) end(ret error) error {
 
 	// set values
 	if ret == nil {
-		j.Status = "succ"
+		j.Status = jobStatusSucc
 	} else {
-		j.Status = "fail"
+		j.Status = jobStatusFail
 	}
 	j.Err = fmt.Sprintf("%v", ret)
 
 	// update
-	err := db.C("job").Update(bson.M{"_id": j.Jobid}, bson.M{"$set": bson.M{
+	err := db.C(dbtable).Update(bson.M{"_id": j.Jobid}, bson.M{"$set": bson.M{
 		"err":    j.Err,
 		"status": j.Status,
 		"etime":  time.Now(),
@@ -164,31 +168,31 @@ func (j *dbjob) end(ret error) error {
 	return nil
 }
 
-func (j *dbjob) pluginSetStart(name string) error {
+func (j *dbjob) pluginSetStart(jobtaskid bson.ObjectId) error {
 	start := time.Now()
 	for i, task := range j.Jobtask {
-		if task.Name == name {
+		if task.ID.Hex() == jobtaskid.Hex() {
 			j.Jobtask[i].Stime = start
 		}
 	}
-	query := bson.M{"_id": j.Jobid, "jobtask.name": name}
+	query := bson.M{"_id": j.Jobid, "jobtask._id": jobtaskid}
 	set := bson.M{"$set": bson.M{
 		"jobtask.$.stime": start,
 	}}
-	err := db.C("job").Update(query, set)
+	err := db.C(string(dbtable)).Update(query, set)
 	return err
 }
 
-func (j *dbjob) pluginAppendlog(name string) (ch chan string) {
+func (j *dbjob) pluginAppendlog(jobtaskid bson.ObjectId) (ch chan string) {
 	ch = make(chan string)
 	go func() {
 		for log := range ch {
 			log = fmt.Sprintf("%s: %s", time.Now().Format(time.RFC3339), log)
-			query := bson.M{"_id": j.Jobid, "jobtask.name": name}
+			query := bson.M{"_id": j.Jobid, "jobtask._id": jobtaskid}
 			set := bson.M{"$push": bson.M{
 				"jobtask.$.logs": log,
 			}}
-			if err := db.C("job").Update(query, set); err != nil {
+			if err := db.C(string(dbtable)).Update(query, set); err != nil {
 				logrus.Info(err)
 				// TODO, db error
 			}
@@ -197,25 +201,37 @@ func (j *dbjob) pluginAppendlog(name string) (ch chan string) {
 	return
 }
 
-func (j *dbjob) pluginEnd(name string, ret error) error {
+func (j *dbjob) pluginEnd(jobtaskid bson.ObjectId, ret error) error {
 	end := time.Now()
-	status := "succ"
+	status := jobStatusSucc
 	if ret != nil {
-		status = "fail"
+		status = jobStatusFail
 	}
-	query := bson.M{"_id": j.Jobid, "jobtask.name": name}
+	query := bson.M{"_id": j.Jobid, "jobtask._id": jobtaskid}
 	set := bson.M{"$set": bson.M{
 		"jobtask.$.err":    fmt.Sprintf("%v", ret),
 		"jobtask.$.status": status,
 		"jobtask.$.etime":  end,
 	}}
-	err := db.C("job").Update(query, set)
+	err := db.C(dbtable).Update(query, set)
 	return err
 }
 
 func (j *dbjob) run() error {
-	logrus.Info("start:", j.Jobname)
 	ctx := context.Background()
+
+	// get contesxt by col and id
+	argsFactory, err := factoryPlugin(j.Context.Col)
+	if err != nil {
+		return err
+	}
+	args, err := argsFactory(j.Context.ID)
+	if err != nil {
+		return err
+	}
+
+	logrus.Info("start:", j.Jobname, "\targs=", args)
+
 	for _, task := range j.Jobtask {
 		// jump the runned task
 		if task.Status != "" {
@@ -223,51 +239,38 @@ func (j *dbjob) run() error {
 			continue
 		}
 
-		logrus.Info("start:", j.Jobname, ":", task.Name)
+		logrus.Info("start:", j.Jobname, ":", task.Name, "\targs=", args)
 
 		// get result channel
-		result := j.pluginAppendlog(task.Name)
+		result := j.pluginAppendlog(task.ID)
 		defer close(result)
 
-		// get args
-		args, err := j.Context.get()
-		if err != nil {
-			return err
-		}
-		logrus.Info("get args:", string(args))
-
-		// get plugin
-		pfac, err := getPlugin(task.Name)
-		if err != nil {
-			return err
-		}
-		p := pfac()
-
-		// config plugin
-		err = p.Conf(args)
-		if err != nil {
-			return err
-		}
-
 		// run plugin
-		j.pluginSetStart(task.Name)
-		err = p.Run(ctx, result)
+		j.pluginSetStart(task.ID)
+		//err = pfac(args, ctx, result)
+		err = args.Run(ctx, task.Name, result)
 
 		// set plugin end-result to db
-		dberr := j.pluginEnd(task.Name, err)
+		dberr := j.pluginEnd(task.ID, err)
 		if dberr != nil {
-			logrus.Info(dberr)
+			logrus.Info("  end:", j.Jobname, "\terr=", dberr, "\targs=", args)
 			return dberr
 		}
+
 		if err != nil {
-			return err
+			break
 		}
 	}
-	fmt.Println(4)
-	logrus.Info("  end:", j.Jobname)
+	// order endwith succ
+	if dberr := args.Endwith(err); dberr != nil {
+		logrus.Info("  end:", j.Jobname, "\terr=", err, "\tdberr=", dberr, "\targs=", args)
+		return dberr
+	}
+	logrus.Info("  end:", j.Jobname, "\terr=", err, "\targs=", args)
 	return nil
 }
 
+// GetRunningJobs get all jobs in running
 func GetRunningJobs() (list []*dbjob, err error) {
 	query := bson.M{"status": ""}
 	list = []*dbjob{}
@@ -278,6 +281,7 @@ func GetRunningJobs() (list []*dbjob, err error) {
 	return
 }
 
+// ContinueJobs continue all failed jobs
 func ContinueJobs() (err error) {
 	list, err := GetRunningJobs()
 	if err != nil {

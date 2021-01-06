@@ -12,10 +12,5 @@ type DbCollection string
 
 const (
 	DBMachineCreate DbCollection = "machinecreate"
+	DBMachineInit   DbCollection = "cloudinit"
 )
-
-type Base struct {
-	Col      string   `json:"col"`
-	Jobname  string   `json:"jobname"`
-	Tasklist []string `json:"tasklist"`
-}
