@@ -10,14 +10,20 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type process struct {
+	Machineid string
+	Initid    string
+	Status    string
+}
+
 // MachineCreate the order of MachineCreate
 type MachineCreate struct {
-	ID     bson.ObjectId `bson:"_id"`              // db id
-	Oper   string        `bson:"oper" form:"oper"` // args:oper
-	Plan   string        `bson:"plan" form:"plan"` // args:plan
-	Num    int           `bson:"num" form:"num"`   // args:num
-	IDs    []string      `bson:"ids"`              // result
-	Status string        // order status
+	ID      bson.ObjectId `bson:"_id"`              // db id
+	Oper    string        `bson:"oper" form:"oper"` // args:oper
+	Plan    string        `bson:"plan" form:"plan"` // args:plan
+	Num     int           `bson:"num" form:"num"`   // args:num
+	Process []process     // process
+	Status  string        // order status
 }
 
 // NewMachineCreate create machine order from httpargs
@@ -44,8 +50,28 @@ func (cm *MachineCreate) Upsert() (err error) {
 }
 
 func (cm *MachineCreate) SetIDs(ids []string) (err error) {
-	cm.IDs = ids
-	set := bson.M{"$set": bson.M{"ids": ids}}
+	list := []process{}
+	for _, id := range ids {
+		i := process{
+			Machineid: id,
+		}
+		list = append(list, i)
+	}
+	cm.Process = list
+
+	set := bson.M{"$set": bson.M{"process": cm.Process}}
+	err = db.C(DBMachineCreate).UpdateId(cm.ID, set)
+	return
+}
+func (cm *MachineCreate) SetProcess(p process) (err error) {
+	fmt.Println("bef:", cm.Process)
+	for i, process := range cm.Process {
+		if process.Machineid == p.Machineid {
+			cm.Process[i] = p
+		}
+	}
+	fmt.Println("aft:", cm.Process)
+	set := bson.M{"$set": bson.M{"process": cm.Process}}
 	err = db.C(DBMachineCreate).UpdateId(cm.ID, set)
 	return
 }
@@ -70,53 +96,86 @@ func (cm *MachineCreate) callapi(ctx context.Context, result chan string) (err e
 }
 
 func (cm *MachineCreate) cloudinit(ctx context.Context, result chan string) (err error) {
-	// TODO cant run multi times.
-	logrus.Info("call init")
-	list := []*Cloudinit{}
-	for _, ip := range cm.IDs {
-		ci := NewCloudinit(ip)
-		err = ci.Upsert()
-		if err != nil {
-			return
-		}
-		err = job.NewDbjob("cloudinit", []string{"machine_init_create", "machine_init_installpackage", "machine_init_reboot"},
-			string(DBMachineInit), ci.ID).Start()
-		if err != nil {
-			return
-		}
-		list = append(list, ci)
-	}
-
-	for {
-		i := 0
-		for _, ci := range list {
-			finish, err := job.CheckFinishbyContextid(ci.ID)
+	for _, process := range cm.Process {
+		if process.Initid == "" {
+			ip := process.Machineid
+			ci := NewCloudinit(ip)
+			if dberr := ci.Upsert(); dberr != nil {
+				return dberr
+			}
+			err = job.NewDbjob("cloudinit", []string{"machine_init_create", "machine_init_installpackage", "machine_init_reboot"},
+				DBMachineInit, ci.ID).Start()
 			if err != nil {
-				logrus.Info("call init: check finish: failed, err=", err)
+				return err
+			}
+			process.Initid = ci.ID.Hex()
+			if dberr := cm.SetProcess(process); dberr != nil {
+				return dberr
+			}
+		} else {
+			logrus.Info("alread start init")
+		}
+	}
+	fmt.Println("in cloud init, new process", cm.Process)
+	for _, process := range cm.Process {
+		if process.Status != "" {
+			process.Status = ""
+			if dberr := cm.SetProcess(process); dberr != nil {
+				return dberr
+			}
+		}
+	}
+	fmt.Println("in cloud init, start to wait", cm.Process)
+	for i := 0; i < 300; i++ {
+		count := 0
+		for _, process := range cm.Process {
+			if process.Status != "" {
+				continue
+			}
+			fmt.Println("check process id=", process.Machineid)
+			finish, err := job.CheckFinishbyContextid(bson.ObjectIdHex(process.Initid))
+			if err != nil {
+				fmt.Println("check process id=", process.Machineid)
 				return err
 			}
 			if !finish {
-				i++
+				fmt.Println("check process id=", process.Machineid, "not finish")
+				count++
 				continue
 			}
+
+			fmt.Println("find finish", process)
+			succ, err := job.CheckSuccbyContextid(bson.ObjectIdHex(process.Initid))
+			if err != nil {
+				return err
+			}
+			if succ {
+				process.Status = "succ"
+			} else {
+				process.Status = "fail"
+			}
+			fmt.Println("set status data=", process)
+			if dberr := cm.SetProcess(process); dberr != nil {
+				return dberr
+			}
 		}
-		if i > 0 {
-			logrus.Info("call init: check finish: not finish num=", i)
+		if count > 0 {
 			time.Sleep(time.Second)
-		} else {
-			logrus.Info("call init: check finish: finish")
-			break
 		}
-	}
-	succ, err := job.CheckSuccbyContextid(list[0].ID)
-	if err != nil {
-		return
-	}
-	if !succ {
-		err = fmt.Errorf("cloud init failed,failed")
 	}
 
-	return err
+	failnum := 0
+	for _, process := range cm.Process {
+		if process.Status == "fail" {
+			failnum++
+		}
+	}
+	if failnum > 0 {
+		err = fmt.Errorf("cloud init failed,failed")
+		return
+
+	}
+	return nil
 }
 
 func (cm *MachineCreate) check(ctx context.Context, result chan string) (err error) {

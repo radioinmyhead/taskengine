@@ -44,7 +44,7 @@ func main() {
 			c.String(400, "err=%s", err.Error())
 			return
 		}
-		c.String(http.StatusOK, "order=%s", order)
+		c.String(http.StatusOK, "order=%v", order)
 	})
 
 	router.GET("/machine/init", func(c *gin.Context) {
