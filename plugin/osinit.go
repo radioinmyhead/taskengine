@@ -25,12 +25,13 @@ func NewCloudinit(ip string) *Cloudinit {
 
 func FindCloudinit(id bson.ObjectId) (job.PluginRunner, error) {
 	ret := &Cloudinit{}
-	err := db.C(string(DBMachineInit)).FindId(id).One(ret)
+	err := db.C(DBMachineInit).FindId(id).One(ret)
 	return ret, err
 }
 
-func (p *Cloudinit) Insert() error {
-	return db.C(string(DBMachineInit)).Insert(p)
+func (p *Cloudinit) Upsert() error {
+	_, err := db.C(DBMachineInit).UpsertId(p.ID, p)
+	return err
 }
 
 func (p *Cloudinit) Endwith(ret error) (err error) {
@@ -39,7 +40,7 @@ func (p *Cloudinit) Endwith(ret error) (err error) {
 		p.Status = "succ"
 	}
 	set := bson.M{"$set": bson.M{"status": p.Status}}
-	err = db.C(string(DBMachineInit)).UpdateId(p.ID, set)
+	err = db.C(DBMachineInit).UpdateId(p.ID, set)
 	return
 }
 
@@ -52,22 +53,19 @@ func (p *Cloudinit) create(ctx context.Context, result chan string) error {
 
 func (p *Cloudinit) installpackage(ctx context.Context, result chan string) (err error) {
 	result <- "call plugin api"
-	//result <- fmt.Sprintf("hello %s", p.order.Oper)
-	time.Sleep(time.Second)
+	//time.Sleep(time.Second)
 	result <- fmt.Sprint("in install package", p)
-	//err = p.order.SetIDs([]string{"A", "B", "C"})
 	result <- "call plugin api end"
-	//fmt.Println("call api", err)
-	return
+	return fmt.Errorf("test: end with failed")
+	//return
 }
 
-func (p *Cloudinit) reboot(ctx context.Context, result chan string) error {
+func (p *Cloudinit) reboot(ctx context.Context, result chan string) (err error) {
 	result <- "wait machine to run"
-	//panic("panic in wait")
 	time.Sleep(time.Second)
 	result <- fmt.Sprint("in install package", p)
 	result <- "wait machine to run end"
-	return fmt.Errorf("test wait failed")
+	return
 }
 
 func (p *Cloudinit) Run(ctx context.Context, action string, result chan string) (err error) {
@@ -86,5 +84,5 @@ func (p *Cloudinit) Run(ctx context.Context, action string, result chan string) 
 }
 
 func init() {
-	job.Registerplugin(string(DBMachineInit), FindCloudinit)
+	job.Registerplugin(DBMachineInit, FindCloudinit)
 }

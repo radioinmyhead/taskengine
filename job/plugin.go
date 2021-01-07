@@ -14,6 +14,7 @@ type RealRunner func(ctx context.Context, result chan string) (err error)
 
 // PluginRunner the runer
 type PluginRunner interface {
+	Upsert() error
 	Run(ctx context.Context, action string, result chan string) error
 	Endwith(error) error
 }

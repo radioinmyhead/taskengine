@@ -38,7 +38,7 @@ type jobcontext struct {
 
 func CheckFinishbyContextid(id bson.ObjectId) (finish bool, err error) {
 	query := bson.M{"context._id": id, "status": ""}
-	n, err := db.C("job").Find(query).Count()
+	n, err := db.C(dbtable).Find(query).Count()
 	if err != nil {
 		return
 	}
@@ -48,7 +48,7 @@ func CheckFinishbyContextid(id bson.ObjectId) (finish bool, err error) {
 
 func CheckSuccbyContextid(id bson.ObjectId) (succ bool, err error) {
 	query := bson.M{"context._id": id, "status": "fail"}
-	n, err := db.C("job").Find(query).Count()
+	n, err := db.C(dbtable).Find(query).Count()
 	if err != nil {
 		return
 	}
@@ -84,7 +84,7 @@ func NewDbjob(name string, list []string, table string, id bson.ObjectId) *dbjob
 
 func (j *dbjob) upsert() (err error) { // upsert
 	query := bson.M{"_id": j.Jobid}
-	_, err = db.C(string(dbtable)).Upsert(query, j)
+	_, err = db.C(dbtable).Upsert(query, j)
 	return
 }
 
@@ -101,7 +101,7 @@ func (j *dbjob) lock() error {
 	set := bson.M{"$set": bson.M{"heart": j.Heart}}
 
 	//logrus.Info("update heartbeat", j.Heart)
-	err := db.C(string(dbtable)).Update(query, set)
+	err := db.C(dbtable).Update(query, set)
 	if err != nil {
 		logrus.Info("update heart failed", err.Error())
 		return err
@@ -230,6 +230,10 @@ func (j *dbjob) run() error {
 		return err
 	}
 
+	if dberr := args.Upsert(); dberr != nil {
+		return dberr
+	}
+
 	logrus.Info("start:", j.Jobname, "\targs=", args)
 
 	for _, task := range j.Jobtask {
@@ -246,13 +250,15 @@ func (j *dbjob) run() error {
 		defer close(result)
 
 		// run plugin
-		j.pluginSetStart(task.ID)
+		if dberr := j.pluginSetStart(task.ID); dberr != nil {
+			logrus.Info("  end:", j.Jobname, "\terr=", dberr, "\targs=", args)
+			return dberr
+		}
 		//err = pfac(args, ctx, result)
 		err = args.Run(ctx, task.Name, result)
 
 		// set plugin end-result to db
-		dberr := j.pluginEnd(task.ID, err)
-		if dberr != nil {
+		if dberr := j.pluginEnd(task.ID, err); dberr != nil {
 			logrus.Info("  end:", j.Jobname, "\terr=", dberr, "\targs=", args)
 			return dberr
 		}
@@ -267,7 +273,7 @@ func (j *dbjob) run() error {
 		return dberr
 	}
 	logrus.Info("  end:", j.Jobname, "\terr=", err, "\targs=", args)
-	return nil
+	return err
 }
 
 // GetRunningJobs get all jobs in running

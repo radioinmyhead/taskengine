@@ -34,19 +34,19 @@ func NewMachineCreate(oper, plan string, num int) (ret *MachineCreate, err error
 // FindMachineCreate get order from db by id
 func FindMachineCreate(id bson.ObjectId) (job.PluginRunner, error) {
 	ret := &MachineCreate{}
-	err := db.C(string(DBMachineCreate)).FindId(id).One(ret)
+	err := db.C(DBMachineCreate).FindId(id).One(ret)
 	return ret, err
 }
 
-func (cm *MachineCreate) Insert() (err error) {
-	err = db.C(string(DBMachineCreate)).Insert(cm)
+func (cm *MachineCreate) Upsert() (err error) {
+	_, err = db.C(DBMachineCreate).UpsertId(cm.ID, cm)
 	return
 }
 
 func (cm *MachineCreate) SetIDs(ids []string) (err error) {
 	cm.IDs = ids
 	set := bson.M{"$set": bson.M{"ids": ids}}
-	err = db.C(string(DBMachineCreate)).UpdateId(cm.ID, set)
+	err = db.C(DBMachineCreate).UpdateId(cm.ID, set)
 	return
 }
 
@@ -56,7 +56,7 @@ func (cm *MachineCreate) Endwith(ret error) (err error) {
 		cm.Status = "fail"
 	}
 	set := bson.M{"$set": bson.M{"status": cm.Status}}
-	err = db.C(string(DBMachineCreate)).UpdateId(cm.ID, set)
+	err = db.C(DBMachineCreate).UpdateId(cm.ID, set)
 	return
 }
 
@@ -75,7 +75,7 @@ func (cm *MachineCreate) cloudinit(ctx context.Context, result chan string) (err
 	list := []*Cloudinit{}
 	for _, ip := range cm.IDs {
 		ci := NewCloudinit(ip)
-		err = ci.Insert()
+		err = ci.Upsert()
 		if err != nil {
 			return
 		}
@@ -116,8 +116,7 @@ func (cm *MachineCreate) cloudinit(ctx context.Context, result chan string) (err
 		err = fmt.Errorf("cloud init failed,failed")
 	}
 
-	logrus.Info("call init end")
-	return nil
+	return err
 }
 
 func (cm *MachineCreate) check(ctx context.Context, result chan string) (err error) {
@@ -141,5 +140,5 @@ func (cm *MachineCreate) Run(ctx context.Context, action string, result chan str
 }
 
 func init() {
-	job.Registerplugin(string(DBMachineCreate), FindMachineCreate)
+	job.Registerplugin(DBMachineCreate, FindMachineCreate)
 }

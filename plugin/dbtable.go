@@ -8,9 +8,7 @@ func SetDB(d *mgo.Database) {
 	db = d
 }
 
-type DbCollection string
-
 const (
-	DBMachineCreate DbCollection = "machinecreate"
-	DBMachineInit   DbCollection = "cloudinit"
+	DBMachineCreate string = "machinecreate"
+	DBMachineInit   string = "cloudinit"
 )
