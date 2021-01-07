@@ -66,13 +66,29 @@ func main() {
 		c.String(http.StatusOK, "order=%s", ci.ID)
 	})
 
-	router.GET("/all", func(c *gin.Context) {
+	router.GET("/continue", func(c *gin.Context) {
 		err := job.ContinueJobs()
 		if err != nil {
 			c.String(400, "err=%s", err.Error())
 			return
 		}
 		c.String(http.StatusOK, "list=%s", "succ")
+	})
+
+	router.GET("/retry", func(c *gin.Context) {
+		id := c.Query("id")
+		if id == "" {
+			c.String(400, "need id")
+			return
+		}
+		err := job.RetryJob(id)
+		if err != nil {
+			err = fmt.Errorf("http retry job failed id=%v err=%v", id, err.Error())
+			c.String(400, "err=%s", err.Error())
+			return
+		}
+		c.String(http.StatusOK, "succ=", id)
+		return
 	})
 
 	router.Run(":8080")

@@ -66,6 +66,7 @@ type dbjob struct {
 	Stime   time.Time
 	Etime   time.Time
 	ticker  *time.Ticker `bson:"-"` // 只有这一个是运行状态，其他的都db状态。
+	force   bool         `bson:"-"` // 仅仅用于重试，避免重试中被其他worder抢去
 }
 
 // NewDbjob create a new job
@@ -115,8 +116,11 @@ func (j *dbjob) Start() (err error) {
 		return
 	}
 
-	if !j.checktimeout() {
-		return fmt.Errorf("lock failed")
+	if !j.force {
+		if !j.checktimeout() {
+			err = fmt.Errorf("Start job: lock failed: no timeout time=%v", j.Heart)
+			return
+		}
 	}
 
 	err = j.lock()
@@ -302,5 +306,89 @@ func ContinueJobs() (err error) {
 			return
 		}
 	}
+	return
+}
+
+// 更新，添加新的job，同时吧整个单子标记成完成
+func (j *dbjob) inserttask(pos int, taskname string) (err error) {
+	j.Err = ""
+	j.Status = ""
+	j.Heart = time.Now()
+	task := newJobtask(taskname)
+	set := bson.M{
+		"$push": bson.M{
+			"jobtask": bson.M{
+				"$each":     []interface{}{task},
+				"$position": pos,
+			},
+		},
+		"$set": bson.M{
+			"heart":  j.Heart,
+			"err":    j.Err,
+			"status": j.Status,
+		},
+	}
+	err = db.C(dbtable).UpdateId(j.Jobid, set)
+	if err != nil {
+		return
+	}
+	err = db.C(dbtable).FindId(j.Jobid).One(j)
+	return
+}
+
+func (j *dbjob) retry() (err error) {
+	// get failed, insert db , clean the job status, continue the job
+	for i := len(j.Jobtask) - 1; i >= 0; i-- {
+		task := j.Jobtask[i]
+		if task.Status == "" {
+			continue
+		} else if task.Status == jobStatusFail {
+			return j.inserttask(i+1, task.Name)
+		} else {
+			return fmt.Errorf("something wrong")
+		}
+	}
+	return fmt.Errorf("not found failed task")
+}
+
+func RetryJob(id string) (err error) {
+	j := &dbjob{}
+	query := bson.M{
+		"_id":    bson.ObjectIdHex(id),
+		"status": jobStatusFail,
+	}
+	err = db.C(dbtable).Find(query).One(j)
+	if err != nil {
+		err = fmt.Errorf("RetryJob find job failed: id error or job not failed: id=%v err=%v query=%v", id, err.Error(), query)
+		return
+	}
+
+	// retry
+	err = j.retry()
+	if err != nil {
+		err = fmt.Errorf("RetryJob retry job failed err=%v", err.Error())
+		return
+	}
+
+	j.force = true
+	return j.Start()
+}
+
+func JobFindAll() (list []*dbjob, err error) {
+	list = []*dbjob{}
+	err = db.C(dbtable).Find(nil).All(&list)
+	return
+}
+
+func JobFindbyid(id string) (job *dbjob, err error) {
+	job = &dbjob{}
+	err = db.C(dbtable).FindId(bson.ObjectIdHex(id)).One(&job)
+	return
+}
+
+func JobFindbyCtx(id string) (list []*dbjob, err error) {
+	list = []*dbjob{}
+	query := bson.M{"context._id": bson.ObjectIdHex(id)}
+	err = db.C(dbtable).Find(query).Limit(1).All(&list)
 	return
 }
