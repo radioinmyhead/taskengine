@@ -87,7 +87,7 @@ func main() {
 			c.String(400, "err=%s", err.Error())
 			return
 		}
-		c.String(http.StatusOK, "succ=", id)
+		c.String(http.StatusOK, "succ=%v", id)
 		return
 	})
 

@@ -82,9 +82,9 @@ func (p *Cloudinit) installpackage(ctx context.Context, result chan string) (err
 	//time.Sleep(time.Second)
 	result <- fmt.Sprint("in install package", p)
 	result <- "call plugin api end"
-	if p.IP == "A" {
-		return fmt.Errorf("test: end with failed")
-	}
+	//if p.IP == "A" {
+	//	return fmt.Errorf("test: end with failed")
+	//}
 	return nil
 }
 
